@@ -1,0 +1,21 @@
+# Development Dockerfile with hot-reload
+FROM node:18-alpine
+
+# Ustaw katalog roboczy
+WORKDIR /app
+
+# Kopiuj package files
+COPY package*.json ./
+
+# Zainstaluj wszystkie zależności (włącznie z dev)
+RUN npm install
+
+# Kopiuj kod źródłowy
+COPY . .
+
+# Eksponuj port
+EXPOSE 5000
+
+# Uruchom z nodemon dla hot-reload
+CMD ["npm", "run", "server"]
+
