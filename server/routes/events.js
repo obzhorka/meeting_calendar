@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const authMiddleware = require('../middleware/auth');
+const authMiddleware = require('../../../../Downloads/meeting-scheduler/server/middleware/auth');
 const {
   createEvent,
   getUserEvents,
@@ -12,7 +12,7 @@ const {
   voteOnLocation,
   updateParticipationStatus,
   confirmEventTime
-} = require('../controllers/eventsController');
+} = require('../../../../Downloads/meeting-scheduler/server/controllers/eventsController');
 
 router.use(authMiddleware);
 
