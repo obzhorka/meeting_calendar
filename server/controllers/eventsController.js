@@ -109,7 +109,83 @@ const getUserEvents = async (req, res) => {
     res.status(500).json({ error: 'Błąd serwera' });
   }
 };
+// Pobieranie szczegółów wydarzenia
+const getEventDetails = async (req, res) => {
+  const { eventId } = req.params;
+  const userId = req.user.userId;
 
+  try {
+    // Sprawdź czy użytkownik jest uczestnikiem
+    const participantCheck = await pool.query(
+        'SELECT * FROM event_participants WHERE event_id = $1 AND user_id = $2',
+        [eventId, userId]
+    );
+
+    if (participantCheck.rows.length === 0) {
+      return res.status(403).json({ error: 'Nie jesteś uczestnikiem tego wydarzenia' });
+    }
+
+    // Pobierz szczegóły wydarzenia
+    const eventResult = await pool.query(
+        `SELECT e.*, u.username as created_by_username, u.full_name as created_by_full_name,
+              g.name as group_name
+       FROM events e
+       LEFT JOIN users u ON e.created_by = u.id
+       LEFT JOIN groups g ON e.group_id = g.id
+       WHERE e.id = $1`,
+        [eventId]
+    );
+
+    if (eventResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Wydarzenie nie znalezione' });
+    }
+
+    // Pobierz uczestników
+    const participantsResult = await pool.query(
+        `SELECT u.id, u.username, u.email, u.full_name, ep.status
+       FROM event_participants ep
+       JOIN users u ON ep.user_id = u.id
+       WHERE ep.event_id = $1
+       ORDER BY ep.created_at ASC`,
+        [eventId]
+    );
+
+    // Pobierz proponowane terminy
+    const timeSlotsResult = await pool.query(
+        `SELECT pts.*, u.username as proposed_by_username,
+              (SELECT COUNT(*) FROM time_slot_votes WHERE time_slot_id = pts.id AND vote = 'yes') as yes_votes,
+              (SELECT COUNT(*) FROM time_slot_votes WHERE time_slot_id = pts.id AND vote = 'no') as no_votes,
+              (SELECT COUNT(*) FROM time_slot_votes WHERE time_slot_id = pts.id AND vote = 'maybe') as maybe_votes
+       FROM proposed_time_slots pts
+       LEFT JOIN users u ON pts.proposed_by = u.id
+       WHERE pts.event_id = $1
+       ORDER BY yes_votes DESC, pts.start_time ASC`,
+        [eventId]
+    );
+
+    // Pobierz propozycje lokalizacji
+    const locationsResult = await pool.query(
+        `SELECT lp.*, u.username as proposed_by_username,
+              (SELECT COUNT(*) FROM location_votes WHERE location_proposal_id = lp.id AND vote = 'yes') as yes_votes,
+              (SELECT COUNT(*) FROM location_votes WHERE location_proposal_id = lp.id AND vote = 'no') as no_votes
+       FROM location_proposals lp
+       LEFT JOIN users u ON lp.proposed_by = u.id
+       WHERE lp.event_id = $1
+       ORDER BY yes_votes DESC, lp.created_at DESC`,
+        [eventId]
+    );
+
+    const event = eventResult.rows[0];
+    event.participants = participantsResult.rows;
+    event.proposed_time_slots = timeSlotsResult.rows;
+    event.location_proposals = locationsResult.rows;
+
+    res.json({ event });
+  } catch (error) {
+    console.error('Błąd pobierania szczegółów wydarzenia:', error);
+    res.status(500).json({ error: 'Błąd serwera' });
+  }
+};
 // Dodanie propozycji lokalizacji
 const proposeLocation = async (req, res) => {
   const { eventId } = req.params;
@@ -161,4 +237,268 @@ const voteOnLocation = async (req, res) => {
     console.error('Błąd głosowania na lokalizację:', error);
     res.status(500).json({ error: 'Błąd serwera' });
   }
+};
+
+// Znajdź wspólne terminy dla wydarzenia
+const findCommonTimeSlotsForEvent = async (req, res) => {
+  const { eventId } = req.params;
+  const { start_date, end_date, preferences } = req.body;
+  const userId = req.user.userId;
+
+  try {
+    // Sprawdź czy użytkownik jest uczestnikiem
+    const participantCheck = await pool.query(
+        'SELECT * FROM event_participants WHERE event_id = $1 AND user_id = $2',
+        [eventId, userId]
+    );
+
+    if (participantCheck.rows.length === 0) {
+      return res.status(403).json({ error: 'Nie jesteś uczestnikiem tego wydarzenia' });
+    }
+
+    // Pobierz wydarzenie
+    const eventResult = await pool.query(
+        'SELECT * FROM events WHERE id = $1',
+        [eventId]
+    );
+
+    if (eventResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Wydarzenie nie znalezione' });
+    }
+
+    const event = eventResult.rows[0];
+
+    // Pobierz uczestników którzy zaakceptowali
+    const participantsResult = await pool.query(
+        'SELECT user_id FROM event_participants WHERE event_id = $1 AND status IN ($2, $3)',
+        [eventId, 'accepted', 'maybe']
+    );
+
+    const participantIds = participantsResult.rows.map(row => row.user_id);
+
+    if (participantIds.length === 0) {
+      return res.status(400).json({ error: 'Brak uczestników do analizy' });
+    }
+
+    // Pobierz dostępność wszystkich uczestników
+    const availabilityResult = await pool.query(
+        `SELECT * FROM user_availability 
+       WHERE user_id = ANY($1)
+       AND start_time >= $2 
+       AND end_time <= $3
+       ORDER BY start_time ASC`,
+        [participantIds, start_date, end_date]
+    );
+
+    // Użyj algorytmu do znalezienia wspólnych terminów
+    const commonSlots = findBestCommonSlots(availabilityResult.rows, {
+      startDate: start_date,
+      endDate: end_date,
+      durationMinutes: event.duration_minutes,
+      preferences: preferences || {},
+      maxResults: 20
+    });
+
+    res.json({
+      commonSlots,
+      participantCount: participantIds.length
+    });
+  } catch (error) {
+    console.error('Błąd znajdowania wspólnych terminów:', error);
+    res.status(500).json({ error: 'Błąd serwera' });
+  }
+};
+
+// Dodanie proponowanego terminu
+const proposeTimeSlot = async (req, res) => {
+  const { eventId } = req.params;
+  const { start_time, end_time } = req.body;
+  const userId = req.user.userId;
+
+  try {
+    const result = await pool.query(
+        'INSERT INTO proposed_time_slots (event_id, start_time, end_time, proposed_by) VALUES ($1, $2, $3, $4) RETURNING *',
+        [eventId, start_time, end_time, userId]
+    );
+
+    res.status(201).json({
+      message: 'Termin został zaproponowany',
+      timeSlot: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Błąd proponowania terminu:', error);
+    res.status(500).json({ error: 'Błąd serwera' });
+  }
+};
+
+// Głosowanie na termin
+const voteOnTimeSlot = async (req, res) => {
+  const { timeSlotId } = req.params;
+  const { vote } = req.body; // yes, no, maybe
+  const userId = req.user.userId;
+
+  try {
+    // Sprawdź czy głos już istnieje
+    const existingVote = await pool.query(
+        'SELECT * FROM time_slot_votes WHERE time_slot_id = $1 AND user_id = $2',
+        [timeSlotId, userId]
+    );
+
+    if (existingVote.rows.length > 0) {
+      // Aktualizuj głos
+      await pool.query(
+          'UPDATE time_slot_votes SET vote = $1 WHERE time_slot_id = $2 AND user_id = $3',
+          [vote, timeSlotId, userId]
+      );
+    } else {
+      // Dodaj nowy głos
+      await pool.query(
+          'INSERT INTO time_slot_votes (time_slot_id, user_id, vote) VALUES ($1, $2, $3)',
+          [timeSlotId, userId, vote]
+      );
+    }
+
+    res.json({ message: 'Głos został zapisany' });
+  } catch (error) {
+    console.error('Błąd głosowania:', error);
+    res.status(500).json({ error: 'Błąd serwera' });
+  }
+};
+// Aktualizacja statusu uczestnictwa
+const updateParticipationStatus = async (req, res) => {
+  const { eventId } = req.params;
+  const { status } = req.body; // accepted, declined, maybe
+  const userId = req.user.userId;
+
+  try {
+    const result = await pool.query(
+        'UPDATE event_participants SET status = $1 WHERE event_id = $2 AND user_id = $3 RETURNING *',
+        [status, eventId, userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Nie jesteś uczestnikiem tego wydarzenia' });
+    }
+
+    res.json({ message: 'Status został zaktualizowany' });
+  } catch (error) {
+    console.error('Błąd aktualizacji statusu:', error);
+    res.status(500).json({ error: 'Błąd serwera' });
+  }
+};
+// Potwierdzenie ostatecznego terminu wydarzenia
+const confirmEventTime = async (req, res) => {
+  const { eventId } = req.params;
+  const { timeSlotId, location } = req.body; // timeSlotId z proposed_time_slots lub start_time/end_time
+  const userId = req.user.userId;
+
+  try {
+    // Sprawdź czy użytkownik jest twórcą wydarzenia lub administratorem grupy
+    const eventResult = await pool.query(
+        'SELECT * FROM events WHERE id = $1',
+        [eventId]
+    );
+
+    if (eventResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Wydarzenie nie znalezione' });
+    }
+
+    const event = eventResult.rows[0];
+
+    // Sprawdź uprawnienia - tylko twórca może potwierdzić termin
+    if (event.created_by !== userId) {
+      // Sprawdź czy użytkownik jest administratorem grupy
+      if (event.group_id) {
+        const adminCheck = await pool.query(
+            'SELECT * FROM group_members WHERE group_id = $1 AND user_id = $2 AND role = $3',
+            [event.group_id, userId, 'admin']
+        );
+        if (adminCheck.rows.length === 0) {
+          return res.status(403).json({ error: 'Tylko twórca wydarzenia lub administrator grupy może potwierdzić termin' });
+        }
+      } else {
+        return res.status(403).json({ error: 'Tylko twórca wydarzenia może potwierdzić termin' });
+      }
+    }
+
+    let startTime, endTime;
+
+    // Jeśli podano timeSlotId, pobierz termin z proposed_time_slots
+    if (timeSlotId) {
+      const timeSlotResult = await pool.query(
+          'SELECT * FROM proposed_time_slots WHERE id = $1 AND event_id = $2',
+          [timeSlotId, eventId]
+      );
+
+      if (timeSlotResult.rows.length === 0) {
+        return res.status(404).json({ error: 'Proponowany termin nie znaleziony' });
+      }
+
+      startTime = timeSlotResult.rows[0].start_time;
+      endTime = timeSlotResult.rows[0].end_time;
+    } else if (req.body.start_time && req.body.end_time) {
+      // Jeśli podano bezpośrednio start_time i end_time
+      startTime = req.body.start_time;
+      endTime = req.body.end_time;
+    } else {
+      return res.status(400).json({ error: 'Musisz podać timeSlotId lub start_time i end_time' });
+    }
+
+    // Aktualizuj wydarzenie - ustaw status na 'scheduled' i zapisz termin
+    const updateResult = await pool.query(
+        `UPDATE events 
+       SET status = 'scheduled', 
+           confirmed_start_time = $1, 
+           confirmed_end_time = $2,
+           location = COALESCE($3, location),
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $4 
+       RETURNING *`,
+        [startTime, endTime, location, eventId]
+    );
+
+    // Wyślij powiadomienia do wszystkich uczestników
+    const participantsResult = await pool.query(
+        'SELECT user_id FROM event_participants WHERE event_id = $1 AND user_id != $2',
+        [eventId, userId]
+    );
+
+    if (participantsResult.rows.length > 0) {
+      const notificationPromises = participantsResult.rows.map(row =>
+          pool.query(
+              'INSERT INTO notifications (user_id, type, title, message, related_entity_type, related_entity_id) VALUES ($1, $2, $3, $4, $5, $6)',
+              [
+                row.user_id,
+                'event_confirmed',
+                'Termin wydarzenia został potwierdzony',
+                `Termin wydarzenia "${event.title}" został potwierdzony: ${new Date(startTime).toLocaleString('pl-PL')}`,
+                'event',
+                eventId
+              ]
+          )
+      );
+      await Promise.all(notificationPromises);
+    }
+
+    res.json({
+      message: 'Termin wydarzenia został potwierdzony',
+      event: updateResult.rows[0]
+    });
+  } catch (error) {
+    console.error('Błąd potwierdzania terminu:', error);
+    res.status(500).json({ error: 'Błąd serwera' });
+  }
+};
+
+module.exports = {
+  createEvent,
+  getUserEvents,
+  getEventDetails,
+  findCommonTimeSlotsForEvent,
+  proposeTimeSlot,
+  voteOnTimeSlot,
+  proposeLocation,
+  voteOnLocation,
+  updateParticipationStatus,
+  confirmEventTime
 };
