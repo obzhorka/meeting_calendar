@@ -308,3 +308,59 @@ const findCommonTimeSlotsForEvent = async (req, res) => {
     res.status(500).json({ error: 'Błąd serwera' });
   }
 };
+
+// Dodanie proponowanego terminu
+const proposeTimeSlot = async (req, res) => {
+  const { eventId } = req.params;
+  const { start_time, end_time } = req.body;
+  const userId = req.user.userId;
+
+  try {
+    const result = await pool.query(
+        'INSERT INTO proposed_time_slots (event_id, start_time, end_time, proposed_by) VALUES ($1, $2, $3, $4) RETURNING *',
+        [eventId, start_time, end_time, userId]
+    );
+
+    res.status(201).json({
+      message: 'Termin został zaproponowany',
+      timeSlot: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Błąd proponowania terminu:', error);
+    res.status(500).json({ error: 'Błąd serwera' });
+  }
+};
+
+// Głosowanie na termin
+const voteOnTimeSlot = async (req, res) => {
+  const { timeSlotId } = req.params;
+  const { vote } = req.body; // yes, no, maybe
+  const userId = req.user.userId;
+
+  try {
+    // Sprawdź czy głos już istnieje
+    const existingVote = await pool.query(
+        'SELECT * FROM time_slot_votes WHERE time_slot_id = $1 AND user_id = $2',
+        [timeSlotId, userId]
+    );
+
+    if (existingVote.rows.length > 0) {
+      // Aktualizuj głos
+      await pool.query(
+          'UPDATE time_slot_votes SET vote = $1 WHERE time_slot_id = $2 AND user_id = $3',
+          [vote, timeSlotId, userId]
+      );
+    } else {
+      // Dodaj nowy głos
+      await pool.query(
+          'INSERT INTO time_slot_votes (time_slot_id, user_id, vote) VALUES ($1, $2, $3)',
+          [timeSlotId, userId, vote]
+      );
+    }
+
+    res.json({ message: 'Głos został zapisany' });
+  } catch (error) {
+    console.error('Błąd głosowania:', error);
+    res.status(500).json({ error: 'Błąd serwera' });
+  }
+};
