@@ -109,7 +109,83 @@ const getUserEvents = async (req, res) => {
     res.status(500).json({ error: 'Błąd serwera' });
   }
 };
+// Pobieranie szczegółów wydarzenia
+const getEventDetails = async (req, res) => {
+  const { eventId } = req.params;
+  const userId = req.user.userId;
 
+  try {
+    // Sprawdź czy użytkownik jest uczestnikiem
+    const participantCheck = await pool.query(
+        'SELECT * FROM event_participants WHERE event_id = $1 AND user_id = $2',
+        [eventId, userId]
+    );
+
+    if (participantCheck.rows.length === 0) {
+      return res.status(403).json({ error: 'Nie jesteś uczestnikiem tego wydarzenia' });
+    }
+
+    // Pobierz szczegóły wydarzenia
+    const eventResult = await pool.query(
+        `SELECT e.*, u.username as created_by_username, u.full_name as created_by_full_name,
+              g.name as group_name
+       FROM events e
+       LEFT JOIN users u ON e.created_by = u.id
+       LEFT JOIN groups g ON e.group_id = g.id
+       WHERE e.id = $1`,
+        [eventId]
+    );
+
+    if (eventResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Wydarzenie nie znalezione' });
+    }
+
+    // Pobierz uczestników
+    const participantsResult = await pool.query(
+        `SELECT u.id, u.username, u.email, u.full_name, ep.status
+       FROM event_participants ep
+       JOIN users u ON ep.user_id = u.id
+       WHERE ep.event_id = $1
+       ORDER BY ep.created_at ASC`,
+        [eventId]
+    );
+
+    // Pobierz proponowane terminy
+    const timeSlotsResult = await pool.query(
+        `SELECT pts.*, u.username as proposed_by_username,
+              (SELECT COUNT(*) FROM time_slot_votes WHERE time_slot_id = pts.id AND vote = 'yes') as yes_votes,
+              (SELECT COUNT(*) FROM time_slot_votes WHERE time_slot_id = pts.id AND vote = 'no') as no_votes,
+              (SELECT COUNT(*) FROM time_slot_votes WHERE time_slot_id = pts.id AND vote = 'maybe') as maybe_votes
+       FROM proposed_time_slots pts
+       LEFT JOIN users u ON pts.proposed_by = u.id
+       WHERE pts.event_id = $1
+       ORDER BY yes_votes DESC, pts.start_time ASC`,
+        [eventId]
+    );
+
+    // Pobierz propozycje lokalizacji
+    const locationsResult = await pool.query(
+        `SELECT lp.*, u.username as proposed_by_username,
+              (SELECT COUNT(*) FROM location_votes WHERE location_proposal_id = lp.id AND vote = 'yes') as yes_votes,
+              (SELECT COUNT(*) FROM location_votes WHERE location_proposal_id = lp.id AND vote = 'no') as no_votes
+       FROM location_proposals lp
+       LEFT JOIN users u ON lp.proposed_by = u.id
+       WHERE lp.event_id = $1
+       ORDER BY yes_votes DESC, lp.created_at DESC`,
+        [eventId]
+    );
+
+    const event = eventResult.rows[0];
+    event.participants = participantsResult.rows;
+    event.proposed_time_slots = timeSlotsResult.rows;
+    event.location_proposals = locationsResult.rows;
+
+    res.json({ event });
+  } catch (error) {
+    console.error('Błąd pobierania szczegółów wydarzenia:', error);
+    res.status(500).json({ error: 'Błąd serwera' });
+  }
+};
 // Dodanie propozycji lokalizacji
 const proposeLocation = async (req, res) => {
   const { eventId } = req.params;
