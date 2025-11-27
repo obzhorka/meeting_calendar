@@ -238,3 +238,73 @@ const voteOnLocation = async (req, res) => {
     res.status(500).json({ error: 'Błąd serwera' });
   }
 };
+
+// Znajdź wspólne terminy dla wydarzenia
+const findCommonTimeSlotsForEvent = async (req, res) => {
+  const { eventId } = req.params;
+  const { start_date, end_date, preferences } = req.body;
+  const userId = req.user.userId;
+
+  try {
+    // Sprawdź czy użytkownik jest uczestnikiem
+    const participantCheck = await pool.query(
+        'SELECT * FROM event_participants WHERE event_id = $1 AND user_id = $2',
+        [eventId, userId]
+    );
+
+    if (participantCheck.rows.length === 0) {
+      return res.status(403).json({ error: 'Nie jesteś uczestnikiem tego wydarzenia' });
+    }
+
+    // Pobierz wydarzenie
+    const eventResult = await pool.query(
+        'SELECT * FROM events WHERE id = $1',
+        [eventId]
+    );
+
+    if (eventResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Wydarzenie nie znalezione' });
+    }
+
+    const event = eventResult.rows[0];
+
+    // Pobierz uczestników którzy zaakceptowali
+    const participantsResult = await pool.query(
+        'SELECT user_id FROM event_participants WHERE event_id = $1 AND status IN ($2, $3)',
+        [eventId, 'accepted', 'maybe']
+    );
+
+    const participantIds = participantsResult.rows.map(row => row.user_id);
+
+    if (participantIds.length === 0) {
+      return res.status(400).json({ error: 'Brak uczestników do analizy' });
+    }
+
+    // Pobierz dostępność wszystkich uczestników
+    const availabilityResult = await pool.query(
+        `SELECT * FROM user_availability 
+       WHERE user_id = ANY($1)
+       AND start_time >= $2 
+       AND end_time <= $3
+       ORDER BY start_time ASC`,
+        [participantIds, start_date, end_date]
+    );
+
+    // Użyj algorytmu do znalezienia wspólnych terminów
+    const commonSlots = findBestCommonSlots(availabilityResult.rows, {
+      startDate: start_date,
+      endDate: end_date,
+      durationMinutes: event.duration_minutes,
+      preferences: preferences || {},
+      maxResults: 20
+    });
+
+    res.json({
+      commonSlots,
+      participantCount: participantIds.length
+    });
+  } catch (error) {
+    console.error('Błąd znajdowania wspólnych terminów:', error);
+    res.status(500).json({ error: 'Błąd serwera' });
+  }
+};
