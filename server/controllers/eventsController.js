@@ -364,3 +364,141 @@ const voteOnTimeSlot = async (req, res) => {
     res.status(500).json({ error: 'Błąd serwera' });
   }
 };
+// Aktualizacja statusu uczestnictwa
+const updateParticipationStatus = async (req, res) => {
+  const { eventId } = req.params;
+  const { status } = req.body; // accepted, declined, maybe
+  const userId = req.user.userId;
+
+  try {
+    const result = await pool.query(
+        'UPDATE event_participants SET status = $1 WHERE event_id = $2 AND user_id = $3 RETURNING *',
+        [status, eventId, userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Nie jesteś uczestnikiem tego wydarzenia' });
+    }
+
+    res.json({ message: 'Status został zaktualizowany' });
+  } catch (error) {
+    console.error('Błąd aktualizacji statusu:', error);
+    res.status(500).json({ error: 'Błąd serwera' });
+  }
+};
+// Potwierdzenie ostatecznego terminu wydarzenia
+const confirmEventTime = async (req, res) => {
+  const { eventId } = req.params;
+  const { timeSlotId, location } = req.body; // timeSlotId z proposed_time_slots lub start_time/end_time
+  const userId = req.user.userId;
+
+  try {
+    // Sprawdź czy użytkownik jest twórcą wydarzenia lub administratorem grupy
+    const eventResult = await pool.query(
+        'SELECT * FROM events WHERE id = $1',
+        [eventId]
+    );
+
+    if (eventResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Wydarzenie nie znalezione' });
+    }
+
+    const event = eventResult.rows[0];
+
+    // Sprawdź uprawnienia - tylko twórca może potwierdzić termin
+    if (event.created_by !== userId) {
+      // Sprawdź czy użytkownik jest administratorem grupy
+      if (event.group_id) {
+        const adminCheck = await pool.query(
+            'SELECT * FROM group_members WHERE group_id = $1 AND user_id = $2 AND role = $3',
+            [event.group_id, userId, 'admin']
+        );
+        if (adminCheck.rows.length === 0) {
+          return res.status(403).json({ error: 'Tylko twórca wydarzenia lub administrator grupy może potwierdzić termin' });
+        }
+      } else {
+        return res.status(403).json({ error: 'Tylko twórca wydarzenia może potwierdzić termin' });
+      }
+    }
+
+    let startTime, endTime;
+
+    // Jeśli podano timeSlotId, pobierz termin z proposed_time_slots
+    if (timeSlotId) {
+      const timeSlotResult = await pool.query(
+          'SELECT * FROM proposed_time_slots WHERE id = $1 AND event_id = $2',
+          [timeSlotId, eventId]
+      );
+
+      if (timeSlotResult.rows.length === 0) {
+        return res.status(404).json({ error: 'Proponowany termin nie znaleziony' });
+      }
+
+      startTime = timeSlotResult.rows[0].start_time;
+      endTime = timeSlotResult.rows[0].end_time;
+    } else if (req.body.start_time && req.body.end_time) {
+      // Jeśli podano bezpośrednio start_time i end_time
+      startTime = req.body.start_time;
+      endTime = req.body.end_time;
+    } else {
+      return res.status(400).json({ error: 'Musisz podać timeSlotId lub start_time i end_time' });
+    }
+
+    // Aktualizuj wydarzenie - ustaw status na 'scheduled' i zapisz termin
+    const updateResult = await pool.query(
+        `UPDATE events 
+       SET status = 'scheduled', 
+           confirmed_start_time = $1, 
+           confirmed_end_time = $2,
+           location = COALESCE($3, location),
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $4 
+       RETURNING *`,
+        [startTime, endTime, location, eventId]
+    );
+
+    // Wyślij powiadomienia do wszystkich uczestników
+    const participantsResult = await pool.query(
+        'SELECT user_id FROM event_participants WHERE event_id = $1 AND user_id != $2',
+        [eventId, userId]
+    );
+
+    if (participantsResult.rows.length > 0) {
+      const notificationPromises = participantsResult.rows.map(row =>
+          pool.query(
+              'INSERT INTO notifications (user_id, type, title, message, related_entity_type, related_entity_id) VALUES ($1, $2, $3, $4, $5, $6)',
+              [
+                row.user_id,
+                'event_confirmed',
+                'Termin wydarzenia został potwierdzony',
+                `Termin wydarzenia "${event.title}" został potwierdzony: ${new Date(startTime).toLocaleString('pl-PL')}`,
+                'event',
+                eventId
+              ]
+          )
+      );
+      await Promise.all(notificationPromises);
+    }
+
+    res.json({
+      message: 'Termin wydarzenia został potwierdzony',
+      event: updateResult.rows[0]
+    });
+  } catch (error) {
+    console.error('Błąd potwierdzania terminu:', error);
+    res.status(500).json({ error: 'Błąd serwera' });
+  }
+};
+
+module.exports = {
+  createEvent,
+  getUserEvents,
+  getEventDetails,
+  findCommonTimeSlotsForEvent,
+  proposeTimeSlot,
+  voteOnTimeSlot,
+  proposeLocation,
+  voteOnLocation,
+  updateParticipationStatus,
+  confirmEventTime
+};
