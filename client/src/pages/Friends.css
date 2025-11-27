@@ -1,0 +1,164 @@
+.friends-page {
+  padding: 40px 0;
+  min-height: calc(100vh - 70px);
+}
+
+.pending-section {
+  background: var(--surface);
+  border-radius: 16px;
+  padding: 24px;
+  margin-bottom: 32px;
+  box-shadow: var(--shadow);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--warning);
+}
+
+.pending-section h2 {
+  font-size: 20px;
+  margin-bottom: 16px;
+}
+
+.pending-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.request-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px;
+  border: 2px solid var(--border);
+  border-radius: 12px;
+  background: var(--background);
+}
+
+.request-info {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.request-info svg {
+  color: var(--text-secondary);
+}
+
+.request-info h4 {
+  font-size: 16px;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+
+.request-info p {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.request-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.friends-section {
+  background: var(--surface);
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: var(--shadow);
+  border: 1px solid var(--border);
+}
+
+.friends-section h2 {
+  font-size: 20px;
+  margin-bottom: 20px;
+}
+
+.friends-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+}
+
+.friend-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px;
+  border: 2px solid var(--border);
+  border-radius: 12px;
+  transition: all 0.2s;
+}
+
+.friend-card:hover {
+  border-color: var(--primary-color);
+  box-shadow: var(--shadow);
+}
+
+.friend-info {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex: 1;
+}
+
+.friend-avatar {
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
+  background: rgba(79, 70, 229, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--primary-color);
+  flex-shrink: 0;
+}
+
+.friend-info h3 {
+  font-size: 16px;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+
+.friend-info p {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+@media (max-width: 768px) {
+  .friends-page {
+    padding: 20px 0;
+  }
+
+  .friends-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .request-item {
+    flex-direction: column;
+    gap: 12px;
+    text-align: center;
+  }
+
+  .request-info {
+    flex-direction: column;
+  }
+
+  .request-actions {
+    width: 100%;
+  }
+
+  .request-actions button {
+    flex: 1;
+  }
+
+  .friend-card {
+    flex-direction: column;
+    text-align: center;
+    gap: 16px;
+  }
+
+  .friend-info {
+    flex-direction: column;
+  }
+}
+
