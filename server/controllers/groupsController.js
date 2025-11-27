@@ -1,4 +1,4 @@
-const pool = require('../../../../Downloads/meeting-scheduler/server/database/db');
+const pool = require('../database/db');
 
 // Tworzenie grupy
 const createGroup = async (req, res) => {

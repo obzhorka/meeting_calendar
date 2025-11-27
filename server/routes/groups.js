@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const authMiddleware = require('../../../../Downloads/meeting-scheduler/server/middleware/auth');
+const authMiddleware = require('../middleware/auth');
 const {
   createGroup,
   getUserGroups,

@@ -10,8 +10,8 @@ const createEvent = async (req, res) => {
     // Sprawdź czy użytkownik jest członkiem grupy (jeśli podano group_id)
     if (group_id) {
       const memberCheck = await pool.query(
-          'SELECT * FROM group_members WHERE group_id = $1 AND user_id = $2',
-          [group_id, userId]
+        'SELECT * FROM group_members WHERE group_id = $1 AND user_id = $2',
+        [group_id, userId]
       );
 
       if (memberCheck.rows.length === 0) {
@@ -21,27 +21,27 @@ const createEvent = async (req, res) => {
 
     // Utwórz wydarzenie
     const eventResult = await pool.query(
-        'INSERT INTO events (title, description, group_id, created_by, location, duration_minutes, status) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
-        [title, description, group_id, userId, location, duration_minutes, 'planning']
+      'INSERT INTO events (title, description, group_id, created_by, location, duration_minutes, status) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
+      [title, description, group_id, userId, location, duration_minutes, 'planning']
     );
 
     const event = eventResult.rows[0];
 
     // Dodaj uczestników
     let participantIdsToAdd = [];
-
+    
     // Jeśli jest grupa, dodaj wszystkich członków jako uczestników
     if (group_id) {
       const membersResult = await pool.query(
-          'SELECT user_id FROM group_members WHERE group_id = $1',
-          [group_id]
+        'SELECT user_id FROM group_members WHERE group_id = $1',
+        [group_id]
       );
       participantIdsToAdd = membersResult.rows.map(row => row.user_id);
     } else if (participant_ids && participant_ids.length > 0) {
       // Jeśli nie ma grupy, użyj podanych participant_ids
       participantIdsToAdd = [...participant_ids];
     }
-
+    
     // Upewnij się że twórca jest zawsze uczestnikiem
     if (!participantIdsToAdd.includes(userId)) {
       participantIdsToAdd.push(userId);
@@ -51,10 +51,10 @@ const createEvent = async (req, res) => {
     if (participantIdsToAdd.length > 0) {
       console.log(`📝 Dodawanie ${participantIdsToAdd.length} uczestników do wydarzenia ${event.id}`);
       const participantPromises = participantIdsToAdd.map(participantId =>
-          pool.query(
-              'INSERT INTO event_participants (event_id, user_id, status) VALUES ($1, $2, $3)',
-              [event.id, participantId, participantId === userId ? 'accepted' : 'invited']
-          )
+        pool.query(
+          'INSERT INTO event_participants (event_id, user_id, status) VALUES ($1, $2, $3)',
+          [event.id, participantId, participantId === userId ? 'accepted' : 'invited']
+        )
       );
       await Promise.all(participantPromises);
       console.log(`✅ Dodano uczestników do wydarzenia ${event.id}`);
@@ -65,20 +65,20 @@ const createEvent = async (req, res) => {
     // Wyślij powiadomienia (pomiń twórcę)
     if (participantIdsToAdd.length > 0) {
       const notificationPromises = participantIdsToAdd
-          .filter(id => id !== userId)
-          .map(participantId =>
-              pool.query(
-                  'INSERT INTO notifications (user_id, type, title, message, related_entity_type, related_entity_id) VALUES ($1, $2, $3, $4, $5, $6)',
-                  [participantId, 'event_invitation', 'Nowe zaproszenie na wydarzenie',
-                    `Zostałeś zaproszony na wydarzenie: ${title}`, 'event', event.id]
-              )
-          );
+        .filter(id => id !== userId)
+        .map(participantId =>
+          pool.query(
+            'INSERT INTO notifications (user_id, type, title, message, related_entity_type, related_entity_id) VALUES ($1, $2, $3, $4, $5, $6)',
+            [participantId, 'event_invitation', 'Nowe zaproszenie na wydarzenie', 
+             `Zostałeś zaproszony na wydarzenie: ${title}`, 'event', event.id]
+          )
+        );
       await Promise.all(notificationPromises);
     }
 
-    res.status(201).json({
+    res.status(201).json({ 
       message: 'Wydarzenie zostało utworzone',
-      event
+      event 
     });
   } catch (error) {
     console.error('Błąd tworzenia wydarzenia:', error);
@@ -92,7 +92,7 @@ const getUserEvents = async (req, res) => {
 
   try {
     const result = await pool.query(
-        `SELECT e.*, ep.status as participation_status,
+      `SELECT e.*, ep.status as participation_status,
               u.username as created_by_username,
               (SELECT COUNT(*) FROM event_participants WHERE event_id = e.id) as participant_count
        FROM events e
@@ -100,7 +100,7 @@ const getUserEvents = async (req, res) => {
        LEFT JOIN users u ON e.created_by = u.id
        WHERE ep.user_id = $1
        ORDER BY e.created_at DESC`,
-        [userId]
+      [userId]
     );
 
     res.json({ events: result.rows });
@@ -109,6 +109,7 @@ const getUserEvents = async (req, res) => {
     res.status(500).json({ error: 'Błąd serwera' });
   }
 };
+
 // Pobieranie szczegółów wydarzenia
 const getEventDetails = async (req, res) => {
   const { eventId } = req.params;
@@ -117,8 +118,8 @@ const getEventDetails = async (req, res) => {
   try {
     // Sprawdź czy użytkownik jest uczestnikiem
     const participantCheck = await pool.query(
-        'SELECT * FROM event_participants WHERE event_id = $1 AND user_id = $2',
-        [eventId, userId]
+      'SELECT * FROM event_participants WHERE event_id = $1 AND user_id = $2',
+      [eventId, userId]
     );
 
     if (participantCheck.rows.length === 0) {
@@ -127,13 +128,13 @@ const getEventDetails = async (req, res) => {
 
     // Pobierz szczegóły wydarzenia
     const eventResult = await pool.query(
-        `SELECT e.*, u.username as created_by_username, u.full_name as created_by_full_name,
+      `SELECT e.*, u.username as created_by_username, u.full_name as created_by_full_name,
               g.name as group_name
        FROM events e
        LEFT JOIN users u ON e.created_by = u.id
        LEFT JOIN groups g ON e.group_id = g.id
        WHERE e.id = $1`,
-        [eventId]
+      [eventId]
     );
 
     if (eventResult.rows.length === 0) {
@@ -142,17 +143,17 @@ const getEventDetails = async (req, res) => {
 
     // Pobierz uczestników
     const participantsResult = await pool.query(
-        `SELECT u.id, u.username, u.email, u.full_name, ep.status
+      `SELECT u.id, u.username, u.email, u.full_name, ep.status
        FROM event_participants ep
        JOIN users u ON ep.user_id = u.id
        WHERE ep.event_id = $1
        ORDER BY ep.created_at ASC`,
-        [eventId]
+      [eventId]
     );
 
     // Pobierz proponowane terminy
     const timeSlotsResult = await pool.query(
-        `SELECT pts.*, u.username as proposed_by_username,
+      `SELECT pts.*, u.username as proposed_by_username,
               (SELECT COUNT(*) FROM time_slot_votes WHERE time_slot_id = pts.id AND vote = 'yes') as yes_votes,
               (SELECT COUNT(*) FROM time_slot_votes WHERE time_slot_id = pts.id AND vote = 'no') as no_votes,
               (SELECT COUNT(*) FROM time_slot_votes WHERE time_slot_id = pts.id AND vote = 'maybe') as maybe_votes
@@ -160,19 +161,19 @@ const getEventDetails = async (req, res) => {
        LEFT JOIN users u ON pts.proposed_by = u.id
        WHERE pts.event_id = $1
        ORDER BY yes_votes DESC, pts.start_time ASC`,
-        [eventId]
+      [eventId]
     );
 
     // Pobierz propozycje lokalizacji
     const locationsResult = await pool.query(
-        `SELECT lp.*, u.username as proposed_by_username,
+      `SELECT lp.*, u.username as proposed_by_username,
               (SELECT COUNT(*) FROM location_votes WHERE location_proposal_id = lp.id AND vote = 'yes') as yes_votes,
               (SELECT COUNT(*) FROM location_votes WHERE location_proposal_id = lp.id AND vote = 'no') as no_votes
        FROM location_proposals lp
        LEFT JOIN users u ON lp.proposed_by = u.id
        WHERE lp.event_id = $1
        ORDER BY yes_votes DESC, lp.created_at DESC`,
-        [eventId]
+      [eventId]
     );
 
     const event = eventResult.rows[0];
@@ -186,6 +187,133 @@ const getEventDetails = async (req, res) => {
     res.status(500).json({ error: 'Błąd serwera' });
   }
 };
+
+// Znajdź wspólne terminy dla wydarzenia
+const findCommonTimeSlotsForEvent = async (req, res) => {
+  const { eventId } = req.params;
+  const { start_date, end_date, preferences } = req.body;
+  const userId = req.user.userId;
+
+  try {
+    // Sprawdź czy użytkownik jest uczestnikiem
+    const participantCheck = await pool.query(
+      'SELECT * FROM event_participants WHERE event_id = $1 AND user_id = $2',
+      [eventId, userId]
+    );
+
+    if (participantCheck.rows.length === 0) {
+      return res.status(403).json({ error: 'Nie jesteś uczestnikiem tego wydarzenia' });
+    }
+
+    // Pobierz wydarzenie
+    const eventResult = await pool.query(
+      'SELECT * FROM events WHERE id = $1',
+      [eventId]
+    );
+
+    if (eventResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Wydarzenie nie znalezione' });
+    }
+
+    const event = eventResult.rows[0];
+
+    // Pobierz uczestników którzy zaakceptowali
+    const participantsResult = await pool.query(
+      'SELECT user_id FROM event_participants WHERE event_id = $1 AND status IN ($2, $3)',
+      [eventId, 'accepted', 'maybe']
+    );
+
+    const participantIds = participantsResult.rows.map(row => row.user_id);
+
+    if (participantIds.length === 0) {
+      return res.status(400).json({ error: 'Brak uczestników do analizy' });
+    }
+
+    // Pobierz dostępność wszystkich uczestników
+    const availabilityResult = await pool.query(
+      `SELECT * FROM user_availability 
+       WHERE user_id = ANY($1)
+       AND start_time >= $2 
+       AND end_time <= $3
+       ORDER BY start_time ASC`,
+      [participantIds, start_date, end_date]
+    );
+
+    // Użyj algorytmu do znalezienia wspólnych terminów
+    const commonSlots = findBestCommonSlots(availabilityResult.rows, {
+      startDate: start_date,
+      endDate: end_date,
+      durationMinutes: event.duration_minutes,
+      preferences: preferences || {},
+      maxResults: 20
+    });
+
+    res.json({ 
+      commonSlots,
+      participantCount: participantIds.length
+    });
+  } catch (error) {
+    console.error('Błąd znajdowania wspólnych terminów:', error);
+    res.status(500).json({ error: 'Błąd serwera' });
+  }
+};
+
+// Dodanie proponowanego terminu
+const proposeTimeSlot = async (req, res) => {
+  const { eventId } = req.params;
+  const { start_time, end_time } = req.body;
+  const userId = req.user.userId;
+
+  try {
+    const result = await pool.query(
+      'INSERT INTO proposed_time_slots (event_id, start_time, end_time, proposed_by) VALUES ($1, $2, $3, $4) RETURNING *',
+      [eventId, start_time, end_time, userId]
+    );
+
+    res.status(201).json({ 
+      message: 'Termin został zaproponowany',
+      timeSlot: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Błąd proponowania terminu:', error);
+    res.status(500).json({ error: 'Błąd serwera' });
+  }
+};
+
+// Głosowanie na termin
+const voteOnTimeSlot = async (req, res) => {
+  const { timeSlotId } = req.params;
+  const { vote } = req.body; // yes, no, maybe
+  const userId = req.user.userId;
+
+  try {
+    // Sprawdź czy głos już istnieje
+    const existingVote = await pool.query(
+      'SELECT * FROM time_slot_votes WHERE time_slot_id = $1 AND user_id = $2',
+      [timeSlotId, userId]
+    );
+
+    if (existingVote.rows.length > 0) {
+      // Aktualizuj głos
+      await pool.query(
+        'UPDATE time_slot_votes SET vote = $1 WHERE time_slot_id = $2 AND user_id = $3',
+        [vote, timeSlotId, userId]
+      );
+    } else {
+      // Dodaj nowy głos
+      await pool.query(
+        'INSERT INTO time_slot_votes (time_slot_id, user_id, vote) VALUES ($1, $2, $3)',
+        [timeSlotId, userId, vote]
+      );
+    }
+
+    res.json({ message: 'Głos został zapisany' });
+  } catch (error) {
+    console.error('Błąd głosowania:', error);
+    res.status(500).json({ error: 'Błąd serwera' });
+  }
+};
+
 // Dodanie propozycji lokalizacji
 const proposeLocation = async (req, res) => {
   const { eventId } = req.params;
@@ -239,131 +367,6 @@ const voteOnLocation = async (req, res) => {
   }
 };
 
-// Znajdź wspólne terminy dla wydarzenia
-const findCommonTimeSlotsForEvent = async (req, res) => {
-  const { eventId } = req.params;
-  const { start_date, end_date, preferences } = req.body;
-  const userId = req.user.userId;
-
-  try {
-    // Sprawdź czy użytkownik jest uczestnikiem
-    const participantCheck = await pool.query(
-        'SELECT * FROM event_participants WHERE event_id = $1 AND user_id = $2',
-        [eventId, userId]
-    );
-
-    if (participantCheck.rows.length === 0) {
-      return res.status(403).json({ error: 'Nie jesteś uczestnikiem tego wydarzenia' });
-    }
-
-    // Pobierz wydarzenie
-    const eventResult = await pool.query(
-        'SELECT * FROM events WHERE id = $1',
-        [eventId]
-    );
-
-    if (eventResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Wydarzenie nie znalezione' });
-    }
-
-    const event = eventResult.rows[0];
-
-    // Pobierz uczestników którzy zaakceptowali
-    const participantsResult = await pool.query(
-        'SELECT user_id FROM event_participants WHERE event_id = $1 AND status IN ($2, $3)',
-        [eventId, 'accepted', 'maybe']
-    );
-
-    const participantIds = participantsResult.rows.map(row => row.user_id);
-
-    if (participantIds.length === 0) {
-      return res.status(400).json({ error: 'Brak uczestników do analizy' });
-    }
-
-    // Pobierz dostępność wszystkich uczestników
-    const availabilityResult = await pool.query(
-        `SELECT * FROM user_availability 
-       WHERE user_id = ANY($1)
-       AND start_time >= $2 
-       AND end_time <= $3
-       ORDER BY start_time ASC`,
-        [participantIds, start_date, end_date]
-    );
-
-    // Użyj algorytmu do znalezienia wspólnych terminów
-    const commonSlots = findBestCommonSlots(availabilityResult.rows, {
-      startDate: start_date,
-      endDate: end_date,
-      durationMinutes: event.duration_minutes,
-      preferences: preferences || {},
-      maxResults: 20
-    });
-
-    res.json({
-      commonSlots,
-      participantCount: participantIds.length
-    });
-  } catch (error) {
-    console.error('Błąd znajdowania wspólnych terminów:', error);
-    res.status(500).json({ error: 'Błąd serwera' });
-  }
-};
-
-// Dodanie proponowanego terminu
-const proposeTimeSlot = async (req, res) => {
-  const { eventId } = req.params;
-  const { start_time, end_time } = req.body;
-  const userId = req.user.userId;
-
-  try {
-    const result = await pool.query(
-        'INSERT INTO proposed_time_slots (event_id, start_time, end_time, proposed_by) VALUES ($1, $2, $3, $4) RETURNING *',
-        [eventId, start_time, end_time, userId]
-    );
-
-    res.status(201).json({
-      message: 'Termin został zaproponowany',
-      timeSlot: result.rows[0]
-    });
-  } catch (error) {
-    console.error('Błąd proponowania terminu:', error);
-    res.status(500).json({ error: 'Błąd serwera' });
-  }
-};
-
-// Głosowanie na termin
-const voteOnTimeSlot = async (req, res) => {
-  const { timeSlotId } = req.params;
-  const { vote } = req.body; // yes, no, maybe
-  const userId = req.user.userId;
-
-  try {
-    // Sprawdź czy głos już istnieje
-    const existingVote = await pool.query(
-        'SELECT * FROM time_slot_votes WHERE time_slot_id = $1 AND user_id = $2',
-        [timeSlotId, userId]
-    );
-
-    if (existingVote.rows.length > 0) {
-      // Aktualizuj głos
-      await pool.query(
-          'UPDATE time_slot_votes SET vote = $1 WHERE time_slot_id = $2 AND user_id = $3',
-          [vote, timeSlotId, userId]
-      );
-    } else {
-      // Dodaj nowy głos
-      await pool.query(
-          'INSERT INTO time_slot_votes (time_slot_id, user_id, vote) VALUES ($1, $2, $3)',
-          [timeSlotId, userId, vote]
-      );
-    }
-
-    res.json({ message: 'Głos został zapisany' });
-  } catch (error) {
-    console.error('Błąd głosowania:', error);
-    res.status(500).json({ error: 'Błąd serwera' });
-  }
-};
 // Aktualizacja statusu uczestnictwa
 const updateParticipationStatus = async (req, res) => {
   const { eventId } = req.params;
@@ -372,8 +375,8 @@ const updateParticipationStatus = async (req, res) => {
 
   try {
     const result = await pool.query(
-        'UPDATE event_participants SET status = $1 WHERE event_id = $2 AND user_id = $3 RETURNING *',
-        [status, eventId, userId]
+      'UPDATE event_participants SET status = $1 WHERE event_id = $2 AND user_id = $3 RETURNING *',
+      [status, eventId, userId]
     );
 
     if (result.rows.length === 0) {
@@ -386,6 +389,7 @@ const updateParticipationStatus = async (req, res) => {
     res.status(500).json({ error: 'Błąd serwera' });
   }
 };
+
 // Potwierdzenie ostatecznego terminu wydarzenia
 const confirmEventTime = async (req, res) => {
   const { eventId } = req.params;
@@ -395,8 +399,8 @@ const confirmEventTime = async (req, res) => {
   try {
     // Sprawdź czy użytkownik jest twórcą wydarzenia lub administratorem grupy
     const eventResult = await pool.query(
-        'SELECT * FROM events WHERE id = $1',
-        [eventId]
+      'SELECT * FROM events WHERE id = $1',
+      [eventId]
     );
 
     if (eventResult.rows.length === 0) {
@@ -410,8 +414,8 @@ const confirmEventTime = async (req, res) => {
       // Sprawdź czy użytkownik jest administratorem grupy
       if (event.group_id) {
         const adminCheck = await pool.query(
-            'SELECT * FROM group_members WHERE group_id = $1 AND user_id = $2 AND role = $3',
-            [event.group_id, userId, 'admin']
+          'SELECT * FROM group_members WHERE group_id = $1 AND user_id = $2 AND role = $3',
+          [event.group_id, userId, 'admin']
         );
         if (adminCheck.rows.length === 0) {
           return res.status(403).json({ error: 'Tylko twórca wydarzenia lub administrator grupy może potwierdzić termin' });
@@ -426,8 +430,8 @@ const confirmEventTime = async (req, res) => {
     // Jeśli podano timeSlotId, pobierz termin z proposed_time_slots
     if (timeSlotId) {
       const timeSlotResult = await pool.query(
-          'SELECT * FROM proposed_time_slots WHERE id = $1 AND event_id = $2',
-          [timeSlotId, eventId]
+        'SELECT * FROM proposed_time_slots WHERE id = $1 AND event_id = $2',
+        [timeSlotId, eventId]
       );
 
       if (timeSlotResult.rows.length === 0) {
@@ -446,7 +450,7 @@ const confirmEventTime = async (req, res) => {
 
     // Aktualizuj wydarzenie - ustaw status na 'scheduled' i zapisz termin
     const updateResult = await pool.query(
-        `UPDATE events 
+      `UPDATE events 
        SET status = 'scheduled', 
            confirmed_start_time = $1, 
            confirmed_end_time = $2,
@@ -454,28 +458,28 @@ const confirmEventTime = async (req, res) => {
            updated_at = CURRENT_TIMESTAMP
        WHERE id = $4 
        RETURNING *`,
-        [startTime, endTime, location, eventId]
+      [startTime, endTime, location, eventId]
     );
 
     // Wyślij powiadomienia do wszystkich uczestników
     const participantsResult = await pool.query(
-        'SELECT user_id FROM event_participants WHERE event_id = $1 AND user_id != $2',
-        [eventId, userId]
+      'SELECT user_id FROM event_participants WHERE event_id = $1 AND user_id != $2',
+      [eventId, userId]
     );
 
     if (participantsResult.rows.length > 0) {
       const notificationPromises = participantsResult.rows.map(row =>
-          pool.query(
-              'INSERT INTO notifications (user_id, type, title, message, related_entity_type, related_entity_id) VALUES ($1, $2, $3, $4, $5, $6)',
-              [
-                row.user_id,
-                'event_confirmed',
-                'Termin wydarzenia został potwierdzony',
-                `Termin wydarzenia "${event.title}" został potwierdzony: ${new Date(startTime).toLocaleString('pl-PL')}`,
-                'event',
-                eventId
-              ]
-          )
+        pool.query(
+          'INSERT INTO notifications (user_id, type, title, message, related_entity_type, related_entity_id) VALUES ($1, $2, $3, $4, $5, $6)',
+          [
+            row.user_id,
+            'event_confirmed',
+            'Termin wydarzenia został potwierdzony',
+            `Termin wydarzenia "${event.title}" został potwierdzony: ${new Date(startTime).toLocaleString('pl-PL')}`,
+            'event',
+            eventId
+          ]
+        )
       );
       await Promise.all(notificationPromises);
     }
