@@ -1,6 +1,12 @@
 import { createContext, useState, useContext, useEffect } from 'react';
 import axios from 'axios';
 
+// Konfiguracja baseURL dla axios
+const API_URL = import.meta.env.VITE_API_URL || '';
+if (API_URL) {
+  axios.defaults.baseURL = API_URL;
+}
+
 const AuthContext = createContext(null);
 
 export const useAuth = () => {
@@ -50,9 +56,18 @@ export const AuthProvider = ({ children }) => {
       
       return { success: true };
     } catch (error) {
+      // Obsługa błędów walidacji (tablica errors)
+      if (error.response?.data?.errors && Array.isArray(error.response.data.errors)) {
+        const errorMessages = error.response.data.errors.map(err => err.msg || err.message).join(', ');
+        return { 
+          success: false, 
+          error: errorMessages || 'Błąd walidacji danych' 
+        };
+      }
+      // Obsługa zwykłych błędów
       return { 
         success: false, 
-        error: error.response?.data?.error || 'Błąd logowania' 
+        error: error.response?.data?.error || error.message || 'Błąd logowania' 
       };
     }
   };
@@ -69,9 +84,18 @@ export const AuthProvider = ({ children }) => {
       
       return { success: true };
     } catch (error) {
+      // Obsługa błędów walidacji (tablica errors)
+      if (error.response?.data?.errors && Array.isArray(error.response.data.errors)) {
+        const errorMessages = error.response.data.errors.map(err => err.msg || err.message).join(', ');
+        return { 
+          success: false, 
+          error: errorMessages || 'Błąd walidacji danych' 
+        };
+      }
+      // Obsługa zwykłych błędów
       return { 
         success: false, 
-        error: error.response?.data?.error || 'Błąd rejestracji' 
+        error: error.response?.data?.error || error.message || 'Błąd rejestracji' 
       };
     }
   };
