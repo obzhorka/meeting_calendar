@@ -1,51 +1,83 @@
-// Socket.io handler
+const jwt = require('jsonwebtoken');
+const { sendMessage } = require('../controllers/chatController');
+
 module.exports = (io) => {
+  // Middleware autoryzacji dla Socket.io
   io.use((socket, next) => {
-    // Podstawowa autoryzacja - można rozszerzyć o JWT
     const token = socket.handshake.auth.token;
-    if (token) {
-      // TODO: Weryfikacja JWT token
-      socket.userId = socket.handshake.auth.userId || null;
+    
+    if (!token) {
+      return next(new Error('Authentication error'));
     }
-    next();
+
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      socket.user = decoded;
+      next();
+    } catch (error) {
+      next(new Error('Authentication error'));
+    }
   });
 
   io.on('connection', (socket) => {
-    console.log(`✅ Użytkownik połączony: ${socket.id}`);
+    console.log(`✅ Użytkownik połączony: ${socket.user.username} (${socket.user.userId})`);
 
-    // Dołączanie do pokojów
+    // Dołączanie do pokoi (grup lub wydarzeń)
     socket.on('join_room', (roomId) => {
       socket.join(roomId);
-      console.log(`👥 Socket ${socket.id} dołączył do pokoju: ${roomId}`);
+      console.log(`👥 Użytkownik ${socket.user.username} dołączył do pokoju ${roomId}`);
     });
 
+    // Opuszczanie pokoju
     socket.on('leave_room', (roomId) => {
       socket.leave(roomId);
-      console.log(`👋 Socket ${socket.id} opuścił pokój: ${roomId}`);
+      console.log(`👋 Użytkownik ${socket.user.username} opuścił pokój ${roomId}`);
     });
 
-    // Wiadomości grupowe
-    socket.on('send_group_message', ({ groupId, message }) => {
-      io.to(`group_${groupId}`).emit('group_message', {
-        groupId,
-        message,
-        userId: socket.userId,
-        timestamp: new Date()
+    // Wysyłanie wiadomości do grupy
+    socket.on('send_group_message', async (data) => {
+      try {
+        const { groupId, message } = data;
+        
+        // Zapisz wiadomość w bazie
+        const savedMessage = await sendMessage(socket.user.userId, groupId, null, message);
+        
+        // Wyślij wiadomość do wszystkich w pokoju
+        io.to(`group_${groupId}`).emit('group_message', savedMessage);
+      } catch (error) {
+        console.error('Błąd wysyłania wiadomości grupowej:', error);
+        socket.emit('error', { message: 'Nie udało się wysłać wiadomości' });
+      }
+    });
+
+    // Wysyłanie wiadomości do wydarzenia
+    socket.on('send_event_message', async (data) => {
+      try {
+        const { eventId, message } = data;
+        
+        // Zapisz wiadomość w bazie
+        const savedMessage = await sendMessage(socket.user.userId, null, eventId, message);
+        
+        // Wyślij wiadomość do wszystkich w pokoju
+        io.to(`event_${eventId}`).emit('event_message', savedMessage);
+      } catch (error) {
+        console.error('Błąd wysyłania wiadomości do wydarzenia:', error);
+        socket.emit('error', { message: 'Nie udało się wysłać wiadomości' });
+      }
+    });
+
+    // Powiadomienie o pisaniu
+    socket.on('typing', (data) => {
+      const { roomId, isTyping } = data;
+      socket.to(roomId).emit('user_typing', {
+        username: socket.user.username,
+        isTyping
       });
     });
 
-    // Wiadomości wydarzeń
-    socket.on('send_event_message', ({ eventId, message }) => {
-      io.to(`event_${eventId}`).emit('event_message', {
-        eventId,
-        message,
-        userId: socket.userId,
-        timestamp: new Date()
-      });
-    });
-
+    // Rozłączenie
     socket.on('disconnect', () => {
-      console.log(`❌ Użytkownik rozłączony: ${socket.id}`);
+      console.log(`❌ Użytkownik rozłączony: ${socket.user.username}`);
     });
   });
 };
